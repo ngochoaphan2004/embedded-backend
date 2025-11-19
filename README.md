@@ -32,5 +32,5 @@ npm install npm
 
 ### 4. Chạy dự án
 ```bash
-run start
+npm run start
 ```

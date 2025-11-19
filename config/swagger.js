@@ -1,10 +1,10 @@
 const swaggerJsdoc = require('swagger-jsdoc');
+const serviceAccountKey = require('../functions/config/serviceAccountKey.json')
 const path = require('path');
 
-const projectId = 'btl-he-thong-nhung';
 const region = 'us-central1';
 
-const serverUrl = `http://localhost:5001/${projectId}/${region}/app`;
+const serverUrl = `http://localhost:5001/${serviceAccountKey.project_id}/${region}/app`;
 
 const swaggerOptions = {
   definition: {
