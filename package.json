@@ -1,18 +1,18 @@
 {
   "name": "functions",
   "description": "Cloud Functions for Firebase",
-  "main": "functions/index.js",
+  "main": "index.js",
   "scripts": {
     "start": "npm-run-all --parallel listen serve",
     "listen": "node listener.js",
-    "lint": "cd functions && eslint .",
-    "serve": "cd functions && firebase emulators:start --only functions",
-    "custom": "cd functions && firebase emulators:start --only functions,database",
-    "all": "cd functions && firebase emulators:start",
-    "shell": "cd functions && firebase functions:shell",
-    "firestart": "cd functions && npm run shell",
-    "deploy": "cd functions && firebase deploy --only functions",
-    "logs": "cd functions && firebase functions:log"
+    "lint": "eslint .",
+    "serve": "firebase emulators:start --only functions",
+    "custom": "firebase emulators:start --only functions,database",
+    "all": "firebase emulators:start",
+    "shell": "firebase functions:shell",
+    "firestart": "npm run shell",
+    "deploy": "firebase deploy --only functions",
+    "logs": "firebase functions:log"
   },
   "engines": {
     "node": "22"

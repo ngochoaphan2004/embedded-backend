@@ -1,4 +1,4 @@
-const { db, firestore } = require('./functions/config/firebase');
+const { db, firestore } = require('./firebase/firebase');
 
 console.log('✅ SmartFarm Realtime Listener Started');
 

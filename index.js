@@ -1,42 +1,20 @@
-const express = require('express');
-const path = require('path');
-const bodyParser = require('body-parser');
-var cors = require('cors')
-const swaggerUi = require('swagger-ui-express');
-const EventEmitter = require('events');
-// Swagger
-const { swaggerOptions, swaggerSpec } = require("./config/swagger")
-// Config
-const logEvents = require('./logEvents');
-// Controller
-const telemetry = require("./controller/telemetry")
-const login = require("./controller/login")
+/**
+ * Import function triggers from their respective submodules:
+ *
+ * const {onCall} = require("firebase-functions/v2/https");
+ * const {onDocumentWritten} = require("firebase-functions/v2/firestore");
+ *
+ * See a full list of supported triggers at https://firebase.google.com/docs/functions
+ */
+
+const {setGlobalOptions} = require("firebase-functions");
+const {onRequest} = require("firebase-functions/https");
+const functions = require('firebase-functions');
+const logger = require("firebase-functions/logger");
+const path = require('path'); 
+const app = require("./app")
+
+setGlobalOptions({ maxInstances: 10 });
 
 
-class Emitter extends EventEmitter { }
-const myEmitter = new Emitter();
-myEmitter.on('log', (msg, fileName) => logEvents(msg, fileName));
-
-const app = express();
-const PORT = process.env.PORT || 3500;
-
-
-// Middleware to parse JSON body 
-app.use(bodyParser.json());
-app.use(cors())
-
-// Middleware storage log
-app.use((req, res, next) => {
-    console.log(`${req.method} ${req.url}`);
-    myEmitter.emit('log', `${req.url}\t${req.method}`, 'reqLog.txt');
-    next();
-});
-// Swagger config
-app.use('/api-docs', swaggerUi.serve, swaggerUi.setup(swaggerSpec));
-
-// Config route
-telemetry(app);
-login(app);
-
-// app.listen(PORT, () => console.log(`Server running on port ${PORT}`));
-module.exports = app;
+exports.app = functions.https.onRequest(app);

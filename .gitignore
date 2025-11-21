@@ -1,5 +1,8 @@
 node_modules
 logs/reqLog.txt
 .env
-functions/config/serviceAccountKey.json
+firebase/serviceAccountKey.json
 .vscode
+node_modules/
+*.local
+*-debug.log

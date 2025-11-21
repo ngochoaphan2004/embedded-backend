@@ -1,9 +1,9 @@
 const moment = require('moment');
 const axios = require('axios');
 const authenticateToken = require('../config/authenticateToken');
-const { db, firestore } = require('../functions/config/firebase');
+const { db, firestore } = require('../firebase/firebase');
 const { successResponse, errorResponse } = require('../asset/response');
-const serviceAccount = require('../functions/config/serviceAccountKey.json');
+const serviceAccount = require('../firebase/serviceAccountKey.json');
 
 
 const isValidField = (field) => {

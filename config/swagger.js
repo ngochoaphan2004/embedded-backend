@@ -1,5 +1,5 @@
 const swaggerJsdoc = require('swagger-jsdoc');
-const serviceAccountKey = require('../functions/config/serviceAccountKey.json')
+const serviceAccountKey = require('../firebase/serviceAccountKey.json')
 const path = require('path');
 
 const region = 'us-central1';
