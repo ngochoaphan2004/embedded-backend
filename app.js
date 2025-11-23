@@ -1,3 +1,6 @@
+// Load local environment variables from .env when running locally
+require('dotenv').config();
+
 const express = require('express');
 const path = require('path');
 const bodyParser = require('body-parser');
@@ -11,6 +14,7 @@ const logEvents = require('./logEvents');
 // Controller
 const telemetry = require("./controller/telemetry")
 const login = require("./controller/login")
+const chatbot = require("./controller/chatbot")
 
 
 class Emitter extends EventEmitter { }
@@ -37,6 +41,7 @@ app.use('/api-docs', swaggerUi.serve, swaggerUi.setup(swaggerSpec));
 // Config route
 telemetry(app);
 login(app);
+chatbot(app);
 
 // app.listen(PORT, () => console.log(`Server running on port ${PORT}`));
 module.exports = app;
