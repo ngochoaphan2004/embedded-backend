@@ -141,6 +141,15 @@
  *         description: >
  *           Thời gian kết thúc lọc dữ liệu (ISO 8601).
  *           Nếu chỉ có `to`, hệ thống sẽ lấy tất cả dữ liệu **đến thời điểm này trở về trước**.
+ *       - in: query
+ *         name: device
+ *         schema:
+ *           type: string
+ *           enum: [device1, device2, device3, device4, history_sensor_data]
+ *           example: "device1"
+ *         description: >
+ *           Tên thiết bị để lấy lịch sử dữ liệu.
+ *           Nếu không chỉ định, mặc định là `history_sensor_data`.
  *     responses:
  *       200:
  *         description: Lấy lịch sử dữ liệu thành công

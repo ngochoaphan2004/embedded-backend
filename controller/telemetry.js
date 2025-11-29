@@ -13,6 +13,17 @@ const isValidField = (field) => {
     return true
 }
 
+const getActiveCollections = async () => {
+    const activeDevices = await firestore.collection('active_device').where('status', '==', true).get();
+    const activeCollections = [];
+    activeDevices.docs.forEach(doc => {
+        const data = doc.data();
+        if(Boolean(data.status))
+            activeCollections.push(data.collection);
+    });
+    return activeCollections;
+}
+
 const telemetry = (app) => {
     const real_time_api = `https://${serviceAccount.project_id}-default-rtdb.firebaseio.com/sensor_data.json`
 
@@ -21,15 +32,16 @@ const telemetry = (app) => {
         try {
             const { getBy } = req.query
 
-            // Fetch latest data from all collections
-            const collections = ['device1', 'device2', 'device3', 'device4', 'history_sensor_data'];
+            // Get active collections
+            const activeCollections = await getActiveCollections();
+
             const latestDocs = [];
 
-            for (const coll of collections) {
+            for (const coll of activeCollections) {
                 const querySnapshot = await firestore.collection(coll).orderBy('dateTime', 'desc').limit(1).get();
                 if (!querySnapshot.empty) {
                     const doc = querySnapshot.docs[0];
-                    latestDocs.push(doc.data());
+                    latestDocs.push({ ...doc.data(), collection: coll });
                 }
             }
 
@@ -102,6 +114,14 @@ const telemetry = (app) => {
             const validDevices = ['device1', 'device2', 'device3', 'device4', 'history_sensor_data'];
             const targetDevice = device && validDevices.includes(device) ? device : 'history_sensor_data';
 
+            // Check if device is active
+            if (device) {
+                const activeCollections = await getActiveCollections();
+                if (!activeCollections.includes(targetDevice)) {
+                    return errorResponse(res, `Thiết bị ${device} không hoạt động`, 403);
+                }
+            }
+
             let history_collection = firestore.collection(targetDevice)
 
             if(sortBy)
@@ -127,7 +147,8 @@ const telemetry = (app) => {
                     return ({
                     id: row.id,
                     ...data,
-                        dateTime: Date.format('YYYY-MM-DD HH:mm:ss.SSS')
+                        dateTime: Date.format('YYYY-MM-DD HH:mm:ss.SSS'),
+                        device: targetDevice
                 })
             })
 
