@@ -33,6 +33,7 @@ const swaggerOptions = {
     security: [{ bearerAuth: [] }],
   },
   apis: [
+    path.join(__dirname, '\\swagger\\login.swagger.js'),
     path.join(__dirname, '\\swagger\\*.js'),
   ],
 };

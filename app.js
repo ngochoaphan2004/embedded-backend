@@ -15,6 +15,7 @@ const logEvents = require('./logEvents');
 const telemetry = require("./controller/telemetry")
 const login = require("./controller/login")
 const chatbot = require("./controller/chatbot")
+const device = require("./controller/device")
 
 
 class Emitter extends EventEmitter { }
@@ -42,6 +43,7 @@ app.use('/api-docs', swaggerUi.serve, swaggerUi.setup(swaggerSpec));
 telemetry(app);
 login(app);
 chatbot(app);
+device(app);
 
 // app.listen(PORT, () => console.log(`Server running on port ${PORT}`));
 module.exports = app;
