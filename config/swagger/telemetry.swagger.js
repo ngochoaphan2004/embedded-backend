@@ -46,12 +46,47 @@
  *                     humidity:
  *                       type: number
  *                       example: 78
+ *                     soilMoisture:
+ *                       type: number
+ *                       example: 45
+ *                     waterLevel:
+ *                       type: number
+ *                       example: 18
+ *                     rainfall:
+ *                       type: number
+ *                       example: 12
  *                     dateTime:
  *                       type: string
  *                       example: "2025-11-08 20:00:00"
  *                     timestamp:
  *                       type: number
  *                       example: 1762506684597
+ *                     latestData:
+ *                       type: array
+ *                       items:
+ *                         type: object
+ *                         properties:
+ *                           temperature:
+ *                             type: number
+ *                             example: 25.3
+ *                           humidity:
+ *                             type: number
+ *                             example: 82
+ *                           soilMoisture:
+ *                             type: number
+ *                             example: 45
+ *                           waterLevel:
+ *                             type: number
+ *                             example: 18
+ *                           rainfall:
+ *                             type: number
+ *                             example: 12
+ *                           dateTime:
+ *                             type: string
+ *                             example: "2025-11-08 20:00:00.000"
+ *                           timestamp:
+ *                             type: number
+ *                             example: 1762506684597
  *       400:
  *         description: Lỗi khi lấy dữ liệu
  *       404:
