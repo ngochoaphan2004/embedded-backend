@@ -45,6 +45,46 @@ const RELATIVE_TIME_KEYWORDS = {
 const RELATIVE_UNIT_PATTERN = Object.keys(RELATIVE_TIME_KEYWORDS).join('|');
 const RELATIVE_TIME_TOLERANCE = 0.5;
 
+const NUMBER_WORD_MAP = Object.freeze({
+  mot: '1',
+  nhat: '1',
+  one: '1',
+  first: '1',
+  hai: '2',
+  second: '2',
+  two: '2',
+  ba: '3',
+  third: '3',
+  three: '3',
+  bon: '4',
+  tu: '4',
+  fourth: '4',
+  four: '4',
+  nam: '5',
+  five: '5',
+  fifth: '5',
+  sau: '6',
+  six: '6',
+  sixth: '6',
+  bay: '7',
+  seven: '7',
+  seventh: '7',
+  tam: '8',
+  eight: '8',
+  eighth: '8',
+  chin: '9',
+  nine: '9',
+  ninth: '9',
+  muoi: '10',
+  ten: '10',
+  tenth: '10',
+});
+
+const LANGUAGE_KEYWORDS = Object.freeze({
+  vi: ['nhiet', 'thiet', 'thong tin', 'ho tro', 'huong dan', 'lien he', 'bao hanh', 'chu ky', 'tan suat', 'thiet bi', 'den', 'bom', 'may bom', 'do am', 'mua'],
+  en: ['temperature', 'humidity', 'device', 'turn on', 'turn off', 'support', 'contact', 'manual', 'policy', 'update', 'frequency', 'cycle', 'sensor', 'water', 'rainfall', 'light', 'pump', 'fan'],
+});
+
 let geminiClientCache = null;
 
 async function getGeminiClient() {
@@ -74,25 +114,27 @@ const chatbot = (app) => {
         return errorResponse(res, 'Thiếu trường `message` trong body', 400);
       }
 
+      const language = detectLanguage(message);
+
       // 1) Phân loại intent theo ưu tiên: Sensor -> Control -> Info
-      const intent = classifyIntent(message);
+      const intent = classifyIntent(message, language);
 
       // 2) Xử lý theo intent
       if (intent.type === 'sensor') {
         const timeCtx = extractTimeContext(message);
-        const reply = await handleSensorQuery(sensorData, includeSensors, timeCtx, message);
-        return successResponse(res, { reply });
+        const reply = await handleSensorQuery(sensorData, includeSensors, timeCtx, message, language);
+        return successResponse(res, { reply, language });
       }
 
       if (intent.type === 'control') {
         const commands = await parseControlCommands(message);
         const reply = await handleControlIntent(commands);
-        return successResponse(res, { reply });
+        return successResponse(res, { reply, language });
       }
 
       if (intent.type === 'info') {
         const reply = await handleInfoQuery(message);
-        return successResponse(res, { reply });
+        return successResponse(res, { reply, language });
       }
 
       // 3) Fallback: gọi Gemini khi không phân loại được
@@ -129,7 +171,7 @@ const chatbot = (app) => {
         }
       }
 
-      const prompt = `${systemPrompt}${contextBlock}\nNgười dùng: ${message}\nTrợ lý:`;
+      const prompt = `${systemPrompt}${contextBlock}\nNgười dùng (${language || 'unknown'}): ${message}\nTrợ lý:`;
 
       const response = await client.models.generateContent({
         model: 'gemini-2.5-flash',
@@ -138,7 +180,7 @@ const chatbot = (app) => {
 
       const text = response?.text || (response?.outputs && response.outputs[0]?.content) || JSON.stringify(response);
 
-      return successResponse(res, { reply: text });
+      return successResponse(res, { reply: text, language });
     } catch (error) {
       console.error('chatbot error', error);
       return errorResponse(res, `Lỗi khi gọi Gemini: ${error.message || 'Không xác định'}`, 500);
@@ -158,13 +200,60 @@ function normalize(str) {
     .trim();
 }
 
-function classifyIntent(message) {
-  const msg = normalize(message);
-  if (!msg) {
+function getLanguageAwareTexts(message, language = 'mixed') {
+  const normalized = normalize(message);
+  const english = (message || '').toLowerCase().trim();
+
+  if (language === 'vi') {
+    return normalized ? [normalized] : [];
+  }
+
+  if (language === 'en') {
+    return english ? [english] : [];
+  }
+
+  const variants = new Set();
+  if (normalized) {
+    variants.add(normalized);
+  }
+  if (english) {
+    variants.add(english);
+  }
+  return Array.from(variants);
+}
+
+function detectLanguage(message) {
+  const normalized = normalize(message);
+  const english = (message || '').toLowerCase();
+
+  const viScore = LANGUAGE_KEYWORDS.vi.reduce(
+    (score, keyword) => (normalized.includes(keyword) ? score + 1 : score),
+    0,
+  );
+  const enScore = LANGUAGE_KEYWORDS.en.reduce(
+    (score, keyword) => (english.includes(keyword) ? score + 1 : score),
+    0,
+  );
+
+  if (viScore === 0 && enScore === 0) {
+    return 'mixed';
+  }
+  if (viScore >= enScore + 1) {
+    return 'vi';
+  }
+  if (enScore >= viScore + 1) {
+    return 'en';
+  }
+  return 'mixed';
+}
+
+function classifyIntent(message, language = 'mixed') {
+  const samples = getLanguageAwareTexts(message, language);
+  if (!samples.length) {
     return { type: 'unknown' };
   }
 
-  const contains = (keywords) => keywords.some(keyword => msg.includes(keyword));
+  const contains = (keywords) => samples.some(sample => keywords.some(keyword => sample.includes(keyword)));
 
   if (contains(CONTROL_KEYWORDS) && contains(DEVICE_KEYWORDS)) {
     return { type: 'control' };
@@ -223,12 +312,12 @@ function extractTimeContext(message) {
   return { kind: 'current' };
 }
 
-async function handleSensorQuery(sensorData, includeSensors, timeCtx, message = '') {
+async function handleSensorQuery(sensorData, includeSensors, timeCtx, message = '', language = 'mixed') {
   if (timeCtx.kind === 'unsupportedPast') {
     return 'Vui lòng nêu rõ thời gian cụ thể (ví dụ: "nhiệt độ 5 phút trước") để tôi có thể tra cứu dữ liệu lịch sử đúng yêu cầu.';
   }
 
-  const requestedSensors = extractSensorTargets(message);
+  const requestedSensors = extractSensorTargets(message, language);
   const restrictToRequest = requestedSensors.length > 0;
   const requestedSet = new Set(requestedSensors);
   const normalizedMessage = normalize(message);
@@ -299,13 +388,13 @@ async function handleSensorQuery(sensorData, includeSensors, timeCtx, message = 
   return addTimeNote(formatAllSensors(effectiveData));
 }
 
-function extractSensorTargets(message = '') {
-  const msg = normalize(message);
-  if (!msg) {
+function extractSensorTargets(message = '', language = 'mixed') {
+  const haystacks = getLanguageAwareTexts(message, language);
+  if (!haystacks.length) {
     return [];
   }
 
-  const has = (phrase) => msg.includes(phrase);
+  const has = (phrase) => haystacks.some(text => text.includes(phrase));
   const targets = new Set();
 
   if (has('nhiet do') || has('temperature') || has('temp')) {
@@ -498,6 +587,31 @@ function normalizeNumber(value) {
   return undefined;
 }
 
+function parseNumericToken(token) {
+  if (!token) {
+    return null;
+  }
+  const sanitized = token.toLowerCase().replace(/[^a-z0-9]/g, '');
+  if (!sanitized) {
+    return null;
+  }
+  if (/^\d+$/.test(sanitized)) {
+    return sanitized;
+  }
+  return NUMBER_WORD_MAP[sanitized] || null;
+}
+
+function resolveDeviceIdentifierFromToken(token) {
+  const numeric = parseNumericToken(token);
+  if (numeric) {
+    return `device${numeric}`;
+  }
+  if (token && token.startsWith('device')) {
+    return token;
+  }
+  return null;
+}
+
 function isDeviceStatusQuestion(normalizedMessage) {
   if (!normalizedMessage) {
     return false;
@@ -589,24 +703,14 @@ function extractDeviceMentions(normalizedMessage) {
 
   const mentions = new Set();
 
-  const deviceMatches = normalizedMessage.match(/device\s*(\d+)/g);
-  if (deviceMatches) {
-    deviceMatches.forEach(match => {
-      const number = match.replace(/[^0-9]/g, '');
-      if (number) {
-        mentions.add(`device${number}`);
-      }
-    });
-  }
-
-  const thietBiMatches = normalizedMessage.match(/thiet\s*bi\s*(\d+)/g);
-  if (thietBiMatches) {
-    thietBiMatches.forEach(match => {
-      const number = match.replace(/[^0-9]/g, '');
-      if (number) {
-        mentions.add(`device${number}`);
-      }
-    });
+  const deviceWordPattern = /(device|thiet\s*bi)(?:\s*(?:number|so))?\s*([a-z0-9]+)/g;
+  let match;
+  while ((match = deviceWordPattern.exec(normalizedMessage)) !== null) {
+    const token = (match[2] || '').trim();
+    const numeric = parseNumericToken(token);
+    if (numeric) {
+      mentions.add(`device${numeric}`);
+    }
   }
 
   BUILTIN_ACTUATORS.forEach(actuator => {
@@ -1012,18 +1116,12 @@ function extractDeviceNameFromMessage(msg) {
     return null;
   }
 
-  const deviceMatch = msg.match(/device\s*([a-z0-9]+)/);
-  if (deviceMatch) {
-    const raw = deviceMatch[1];
-    if (/^\d+$/.test(raw)) {
-      return `device${raw}`;
+  const generalMatch = msg.match(/(device|thiet\s*bi)(?:\s*(?:number|so))?\s*([a-z0-9]+)/);
+  if (generalMatch) {
+    const resolved = resolveDeviceIdentifierFromToken(generalMatch[2]);
+    if (resolved) {
+      return resolved;
     }
-    return raw.startsWith('device') ? raw : `device${raw}`;
-  }
-
-  const deviceNumberMatch = msg.match(/thiet bi\s*(\d+)/);
-  if (deviceNumberMatch) {
-    return `device${deviceNumberMatch[1]}`;
   }
 
   return null;
