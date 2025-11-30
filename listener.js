@@ -1,4 +1,5 @@
 const { db, firestore } = require('./firebase/firebase');
+const sendEmail = require('./config/send_email');
 
 const MAX_DATA_POINTS = 10;
 
@@ -95,6 +96,14 @@ const detectAnomaly = async (newData, lastDataArray, collection) => {
       }
     } catch (err) {
       console.error(`❌ Error updating ${deviceName} status:`, err);
+    }
+
+    // Send email notification
+    try {
+      await sendEmail(deviceName);
+      console.log(`📧 Email sent for anomaly in ${deviceName}`);
+    } catch (emailErr) {
+      console.error(`❌ Failed to send email for ${deviceName}:`, emailErr);
     }
   }
 
