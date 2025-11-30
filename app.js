@@ -16,6 +16,7 @@ const telemetry = require("./controller/telemetry")
 const login = require("./controller/login")
 const chatbot = require("./controller/chatbot")
 const device = require("./controller/device")
+const test = require("./controller/test")
 
 
 class Emitter extends EventEmitter { }
@@ -44,6 +45,7 @@ telemetry(app);
 login(app);
 chatbot(app);
 device(app);
+test(app);
 
 // app.listen(PORT, () => console.log(`Server running on port ${PORT}`));
 module.exports = app;
