@@ -37,6 +37,7 @@ const RELATIVE_TIME_KEYWORDS = {
   minute: { unit: 'minute', label: 'phút', ms: 60 * 1000 },
   min: { unit: 'minute', label: 'phút', ms: 60 * 1000 },
   gio: { unit: 'hour', label: 'giờ', ms: 60 * 60 * 1000 },
+  tieng: { unit: 'hour', label: 'giờ', ms: 60 * 60 * 1000 },
   hour: { unit: 'hour', label: 'giờ', ms: 60 * 60 * 1000 },
   ngay: { unit: 'day', label: 'ngày', ms: 24 * 60 * 60 * 1000 },
   day: { unit: 'day', label: 'ngày', ms: 24 * 60 * 60 * 1000 },
@@ -80,10 +81,22 @@ const NUMBER_WORD_MAP = Object.freeze({
   tenth: '10',
 });
 
+const NUMBER_WORD_PATTERN = Object.keys(NUMBER_WORD_MAP).join('|');
+
 const LANGUAGE_KEYWORDS = Object.freeze({
   vi: ['nhiet', 'thiet', 'thong tin', 'ho tro', 'huong dan', 'lien he', 'bao hanh', 'chu ky', 'tan suat', 'thiet bi', 'den', 'bom', 'may bom', 'do am', 'mua'],
   en: ['temperature', 'humidity', 'device', 'turn on', 'turn off', 'support', 'contact', 'manual', 'policy', 'update', 'frequency', 'cycle', 'sensor', 'water', 'rainfall', 'light', 'pump', 'fan'],
 });
+
+const SENSOR_FALLBACK_MARKERS = [
+  'xin loi',
+  'khong the lay du lieu',
+  'khong tim thay du lieu',
+  'khong co du lieu',
+  'vui long neu ro',
+  'chua hieu',
+  'chua the tra loi',
+];
 
 let geminiClientCache = null;
 
@@ -122,7 +135,26 @@ const chatbot = (app) => {
       // 2) Xử lý theo intent
       if (intent.type === 'sensor') {
         const timeCtx = extractTimeContext(message);
-        const reply = await handleSensorQuery(sensorData, includeSensors, timeCtx, message, language);
+        let reply = await handleSensorQuery(sensorData, includeSensors, timeCtx, message, language);
+
+        if (needsSensorFallback(reply)) {
+          try {
+            reply = await generateGeminiAnswer({
+              message,
+              language,
+              sensorData,
+              includeSensors,
+              extraInstructions: 'Hãy đánh giá lại xem người dùng muốn dữ liệu cảm biến, điều khiển thiết bị hay hỏi thông tin chung. Nếu xác định được ý định mới, hãy trả lời tương ứng (ví dụ: hướng dẫn điều khiển hoặc tóm tắt thông tin). Nếu vẫn thiếu dữ liệu cảm biến, hãy giải thích rõ lý do và gợi ý cách đặt câu hỏi lại.',
+            });
+          } catch (error) {
+            console.error('sensor intent gemini fallback error', error);
+          }
+
+          if (!reply) {
+            reply = 'Xin lỗi, tôi vẫn chưa thể diễn giải câu hỏi này. Bạn có thể mô tả cụ thể hơn không?';
+          }
+        }
+
         return successResponse(res, { reply, language });
       }
 
@@ -138,49 +170,12 @@ const chatbot = (app) => {
       }
 
       // 3) Fallback: gọi Gemini khi không phân loại được
-      let client;
       try {
-        client = await getGeminiClient();
+        const reply = await generateGeminiAnswer({ message, language, sensorData, includeSensors });
+        return successResponse(res, { reply, language });
       } catch (error) {
         return errorResponse(res, error.message || 'Không thể khởi tạo Gemini', 500);
       }
-
-      let systemPrompt = `Bạn là trợ lý SmartFarm. Trả lời ngắn gọn, rõ ràng bằng tiếng Việt. Nếu có dữ liệu cảm biến được cung cấp thì hãy sử dụng nó để trả lời vào ngữ cảnh phù hợp.`;
-
-      let contextBlock = '';
-      if (includeSensors && sensorData) {
-        const sensorLines = SENSOR_DEFINITIONS.map(sensor => {
-          const value = sensor.getValue(sensorData);
-          if (value === undefined || value === null) {
-            return null;
-          }
-          if (sensor.type === 'status') {
-            return `${sensor.label}: ${formatOnOff(value)}`;
-          }
-          const numeric = normalizeNumber(value);
-          const formatted = Number.isFinite(numeric) ? `${numeric.toFixed(1)}${sensor.unit || ''}` : value;
-          return `${sensor.label}: ${formatted}`;
-        }).filter(Boolean);
-
-        const sensorTimestamp = formatTimestamp(sensorData?.dateTime || sensorData?.timestamp);
-        if (sensorLines.length > 0) {
-          contextBlock = `\n\nDữ liệu cảm biến hiện tại:\n${sensorLines.join('\n')}`;
-          if (sensorTimestamp) {
-            contextBlock += `\nThời gian cập nhật: ${sensorTimestamp}`;
-          }
-        }
-      }
-
-      const prompt = `${systemPrompt}${contextBlock}\nNgười dùng (${language || 'unknown'}): ${message}\nTrợ lý:`;
-
-      const response = await client.models.generateContent({
-        model: 'gemini-2.5-flash',
-        contents: prompt,
-      });
-
-      const text = response?.text || (response?.outputs && response.outputs[0]?.content) || JSON.stringify(response);
-
-      return successResponse(res, { reply: text, language });
     } catch (error) {
       console.error('chatbot error', error);
       return errorResponse(res, `Lỗi khi gọi Gemini: ${error.message || 'Không xác định'}`, 500);
@@ -270,14 +265,28 @@ function classifyIntent(message, language = 'mixed') {
   return { type: 'unknown' };
 }
 
+function needsSensorFallback(reply) {
+  if (!reply || typeof reply !== 'string') {
+    return true;
+  }
+
+  const normalized = normalize(reply);
+  if (!normalized) {
+    return true;
+  }
+
+  return SENSOR_FALLBACK_MARKERS.some(marker => normalized.includes(marker));
+}
+
 function extractTimeContext(message) {
   const msg = normalize(message);
   if (!msg) {
     return { kind: 'current' };
   }
 
-  const relativeRegex = new RegExp(`(\\d+(?:[\\.,]\\d+)?)\\s*(${RELATIVE_UNIT_PATTERN})\\b(?:\\s*(truoc|ago))?`);
-  const relativeMatch = msg.match(relativeRegex);
+    const numericMsg = substituteNumberWords(msg);
+    const relativeRegex = new RegExp(`(\\d+(?:[\\.,]\\d+)?)\\s*(${RELATIVE_UNIT_PATTERN})\\b(?:\\s*(truoc|ago))?`);
+    const relativeMatch = numericMsg.match(relativeRegex);
   if (relativeMatch) {
     const rawValue = relativeMatch[1].replace(',', '.');
     const value = parseFloat(rawValue);
@@ -310,6 +319,17 @@ function extractTimeContext(message) {
   }
 
   return { kind: 'current' };
+}
+
+function substituteNumberWords(text) {
+  if (!text) {
+    return '';
+  }
+  if (!NUMBER_WORD_PATTERN) {
+    return text;
+  }
+  const pattern = new RegExp(`\\b(${NUMBER_WORD_PATTERN})\\b`, 'g');
+  return text.replace(pattern, (_, word) => NUMBER_WORD_MAP[word] || word);
 }
 
 async function handleSensorQuery(sensorData, includeSensors, timeCtx, message = '', language = 'mixed') {
@@ -369,7 +389,7 @@ async function handleSensorQuery(sensorData, includeSensors, timeCtx, message = 
         missing.push(sensor.label);
         return;
       }
-      formatted.push(formatSingleSensor(sensor, value, effectiveData));
+      formatted.push(formatSingleSensor(sensor, value, effectiveData, timeCtx));
     });
 
     if (formatted.length === 0) {
@@ -385,7 +405,7 @@ async function handleSensorQuery(sensorData, includeSensors, timeCtx, message = 
     return addTimeNote(`📌 **Thông tin bạn yêu cầu:**\n\n${content}${missingNotice}`);
   }
 
-  return addTimeNote(formatAllSensors(effectiveData));
+  return addTimeNote(formatAllSensors(effectiveData, timeCtx));
 }
 
 function extractSensorTargets(message = '', language = 'mixed') {
@@ -487,7 +507,7 @@ const SENSOR_DEFINITIONS = [
   },
 ];
 
-function formatAllSensors(sensorData) {
+function formatAllSensors(sensorData, timeCtx) {
   if (!sensorData) {
     return 'Xin lỗi, tôi chưa thể lấy dữ liệu cảm biến. Vui lòng thử lại sau.';
   }
@@ -498,22 +518,34 @@ function formatAllSensors(sensorData) {
       return `${sensor.icon} ${sensor.label}: N/A`;
     }
     if (sensor.type === 'status') {
-      return `${sensor.icon} ${sensor.label}: ${formatOnOff(value)}`;
+      const prefix = timeCtx?.kind === 'relative' && timeCtx.description
+        ? `${sensor.label} khoảng ${timeCtx.description}`
+        : `${sensor.label} hiện tại`;
+      return `${sensor.icon} ${prefix}: ${formatOnOff(value)}`;
     }
     const numeric = normalizeNumber(value);
     const formatted = Number.isFinite(numeric) ? numeric.toFixed(1) : value;
-    return `${sensor.icon} ${sensor.label}: ${formatted}${sensor.unit || ''}`;
+    const prefix = timeCtx?.kind === 'relative' && timeCtx.description
+      ? `${sensor.label} khoảng ${timeCtx.description}`
+      : `${sensor.label} hiện tại`;
+    return `${sensor.icon} ${prefix}: ${formatted}${sensor.unit || ''}`;
   });
 
   const timestamp = formatTimestamp(sensorData?.dateTime || sensorData?.timestamp);
   const timestampLine = timestamp ? `\n\n⏰ Cập nhật lúc: ${timestamp}` : '';
-  return `📊 **Tất cả thông số cảm biến hiện tại:**\n\n${lines.join('\n')}${timestampLine}`;
+  const heading = timeCtx?.kind === 'relative'
+    ? '📊 **Thông số cảm biến cho khoảng thời gian bạn yêu cầu:**'
+    : '📊 **Tất cả thông số cảm biến hiện tại:**';
+  return `${heading}\n\n${lines.join('\n')}${timestampLine}`;
 }
 
-function formatSingleSensor(sensor, rawValue, sensorData) {
+function formatSingleSensor(sensor, rawValue, sensorData, timeCtx) {
   if (sensor.type === 'status') {
     const state = formatOnOff(rawValue);
-    return `${sensor.label} hiện tại đang: **${state.toUpperCase()}**${appendTimestamp(sensorData)}`;
+    const label = timeCtx?.kind === 'relative' && timeCtx.description
+      ? `${sensor.label} khoảng ${timeCtx.description}`
+      : `${sensor.label} hiện tại`;
+    return `${label} đang: **${state.toUpperCase()}**${appendTimestamp(sensorData)}`;
   }
 
   const numeric = normalizeNumber(rawValue);
@@ -521,7 +553,10 @@ function formatSingleSensor(sensor, rawValue, sensorData) {
     return `Xin lỗi, tôi không tìm thấy dữ liệu cho ${sensor.label}.`;
   }
 
-  let response = `${sensor.label} hiện tại là: **${numeric.toFixed(1)}${sensor.unit || ''}**`;
+  const label = timeCtx?.kind === 'relative' && timeCtx.description
+    ? `${sensor.label} khoảng ${timeCtx.description}`
+    : `${sensor.label} hiện tại`;
+  let response = `${label} là: **${numeric.toFixed(1)}${sensor.unit || ''}**`;
 
   if (sensor.key === 'temperature') {
     if (numeric < 20) response += ' (Thấp)';
@@ -1250,6 +1285,43 @@ async function generateGeminiText(client, prompt) {
   }
 
   return response ? JSON.stringify(response) : '';
+}
+
+async function generateGeminiAnswer({ message, language, sensorData, includeSensors, systemPrompt, extraInstructions }) {
+  const client = await getGeminiClient();
+  const basePrompt = systemPrompt || 'Bạn là trợ lý SmartFarm. Trả lời ngắn gọn, rõ ràng bằng tiếng Việt. Nếu có dữ liệu cảm biến được cung cấp thì hãy sử dụng nó một cách phù hợp.';
+  const sensorBlock = buildSensorContextBlock(sensorData, includeSensors);
+  const instructions = extraInstructions ? `\n\n${extraInstructions}` : '';
+  const prompt = `${basePrompt}${sensorBlock}${instructions}\nNgười dùng (${language || 'unknown'}): ${message}\nTrợ lý:`;
+  const text = await generateGeminiText(client, prompt);
+  return text?.trim() || '';
+}
+
+function buildSensorContextBlock(sensorData, includeSensors) {
+  if (!includeSensors || !sensorData) {
+    return '';
+  }
+
+  const sensorLines = SENSOR_DEFINITIONS.map(sensor => {
+    const value = sensor.getValue(sensorData);
+    if (value === undefined || value === null) {
+      return null;
+    }
+    if (sensor.type === 'status') {
+      return `${sensor.label}: ${formatOnOff(value)}`;
+    }
+    const numeric = normalizeNumber(value);
+    const formatted = Number.isFinite(numeric) ? `${numeric.toFixed(1)}${sensor.unit || ''}` : value;
+    return `${sensor.label}: ${formatted}`;
+  }).filter(Boolean);
+
+  if (!sensorLines.length) {
+    return '';
+  }
+
+  const sensorTimestamp = formatTimestamp(sensorData?.dateTime || sensorData?.timestamp);
+  const timestampLine = sensorTimestamp ? `\nThời gian cập nhật: ${sensorTimestamp}` : '';
+  return `\n\nDữ liệu cảm biến hiện tại:\n${sensorLines.join('\n')}${timestampLine}`;
 }
 
 function parseJsonFromText(text) {
