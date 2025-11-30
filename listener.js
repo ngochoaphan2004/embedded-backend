@@ -3,26 +3,26 @@ const { db, firestore } = require('./firebase/firebase');
 const MAX_DATA_POINTS = 10;
 
 const SENSOR_LIMITS = {
-    temperature: {
-        min: -20,
-        max: 80
-    },
-    humidity: {
-        min: 0,
-        max: 100
-    },
-    soilMoisture: {
-        min: 0,
-        max: 100
-    },
-    waterLevel: {
-        min: 0,
-        max: 300
-    },
-    rainfall: {
-        min: 0,
-        max: 100
-    }
+  temperature: {
+    min: -20,
+    max: 80
+  },
+  humidity: {
+    min: 0,
+    max: 100
+  },
+  soilMoisture: {
+    min: 0,
+    max: 100
+  },
+  waterLevel: {
+    min: 0,
+    max: 300
+  },
+  rainfall: {
+    min: 0,
+    max: 100
+  }
 };
 
 console.log('✅ SmartFarm Realtime Listener Started');
@@ -116,76 +116,76 @@ const initializeLastData = async () => {
 
 
 db.ref('sensor_data').on('value', async (snapshot) => {
-  if (!isInitialized) {
-    await initializeLastData();
-    isInitialized = true;
-    return;
-  }
+  if (isInitialized) {
+    const data = snapshot.val();
+    if (!data) return;
 
-  const data = snapshot.val();
-  if (!data) return;
+    if (data.timestamp <= lastTimestamp) return;
+    lastTimestamp = data.timestamp;
 
-  if (data.timestamp <= lastTimestamp) return;
-  lastTimestamp = data.timestamp;
+    try {
+      function generateRandomValue(value, variance = 0.05) {
+        if (typeof value !== 'number') return value;
 
-  try {
-    function generateRandomValue(value, variance = 0.05) {
-      if (typeof value !== 'number') return value;
+        const min = 1 - variance;
+        const max = 1 + variance;
+        const randomFactor = Math.random() * (max - min) + min;
 
-      const min = 1 - variance;
-      const max = 1 + variance;
-      const randomFactor = Math.random() * (max - min) + min;
-
-      return parseFloat((value * randomFactor).toFixed(2));
-    }
-
-    const randomizeData = (baseData) => {
-      const randomized = {};
-      for (const key in baseData) {
-        randomized[key] = generateRandomValue(baseData[key]);
+        return parseFloat((value * randomFactor).toFixed(2));
       }
-      return randomized;
-    };
 
-    // Insert to history_sensor_data
-    const historyData = { ...data, dateTime: new Date(data.timestamp) };
+      const randomizeData = (baseData) => {
+        const randomized = {};
+        for (const key in baseData) {
+          randomized[key] = generateRandomValue(baseData[key]);
+        }
+        return randomized;
+      };
 
-    // Anomaly detection for history_sensor_data
-    const historyAnomaly = await detectAnomaly(historyData, lastData['history_sensor_data'], 'history_sensor_data');
+      // Insert to history_sensor_data
+      const historyData = { ...data, dateTime: new Date(data.timestamp) };
 
-    if (!historyAnomaly) {
-      const historyDocRef = await firestore.collection('history_sensor_data').add(historyData);
-      console.log('📘 Inserted data to history_sensor_data → doc ID:', historyDocRef.id);
+      // Anomaly detection for history_sensor_data
+      const historyAnomaly = await detectAnomaly(historyData, lastData['history_sensor_data'], 'history_sensor_data');
 
-      lastData['history_sensor_data'].push(historyData);
-      if (lastData['history_sensor_data'].length > MAX_DATA_POINTS) {
-        lastData['history_sensor_data'].shift();
-      }
-    } else {
-      console.log('🚫 Skipped inserting anomalous data to history_sensor_data');
-    }
+      if (!historyAnomaly) {
+        const historyDocRef = await firestore.collection('history_sensor_data').add(historyData);
+        console.log('📘 Inserted data to history_sensor_data → doc ID:', historyDocRef.id);
 
-    const devices = ['device1', 'device2', 'device3', 'device4'];
-    for (const device of devices) {
-      const randomizedData = randomizeData(data);
-      const deviceData = { ...randomizedData, dateTime: new Date(data.timestamp) };
-
-      // Anomaly detection
-      const deviceAnomaly = await detectAnomaly(deviceData, lastData[device], device);
-
-      if (!deviceAnomaly) {
-        const deviceDocRef = await firestore.collection(device).add(deviceData);
-        console.log(`📘 Inserted data to ${device} → doc ID:`, deviceDocRef.id);
-
-        lastData[device].push(deviceData);
-        if (lastData[device].length > MAX_DATA_POINTS) {
-          lastData[device].shift();
+        lastData['history_sensor_data'].push(historyData);
+        if (lastData['history_sensor_data'].length > MAX_DATA_POINTS) {
+          lastData['history_sensor_data'].shift();
         }
       } else {
-        console.log(`🚫 Skipped inserting anomalous data to ${device}`);
+        console.log('🚫 Skipped inserting anomalous data to history_sensor_data');
       }
+
+      const devices = ['device1', 'device2', 'device3', 'device4'];
+      for (const device of devices) {
+        const randomizedData = randomizeData(data);
+        const deviceData = { ...randomizedData, dateTime: new Date(data.timestamp) };
+
+        // Anomaly detection
+        const deviceAnomaly = await detectAnomaly(deviceData, lastData[device], device);
+
+        if (!deviceAnomaly) {
+          const deviceDocRef = await firestore.collection(device).add(deviceData);
+          console.log(`📘 Inserted data to ${device} → doc ID:`, deviceDocRef.id);
+
+          lastData[device].push(deviceData);
+          if (lastData[device].length > MAX_DATA_POINTS) {
+            lastData[device].shift();
+          }
+        } else {
+          console.log(`🚫 Skipped inserting anomalous data to ${device}`);
+        }
+      }
+    } catch (err) {
+      console.error('❌ Firestore write error:', err);
     }
-  } catch (err) {
-    console.error('❌ Firestore write error:', err);
   }
+  else {
+    await initializeLastData();
+  }
+  isInitialized = true;
 });
