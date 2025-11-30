@@ -81,3 +81,45 @@
  *       500:
  *         description: Lỗi hệ thống
  */
+
+/**
+ * @swagger
+ * /api/devices:
+ *   get:
+ *     summary: Lấy trạng thái của tất cả thiết bị
+ *     tags: [Device]
+ *     security:
+ *       - bearerAuth: []
+ *     responses:
+ *       200:
+ *         description: Lấy trạng thái thiết bị thành công
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success:
+ *                   type: boolean
+ *                   example: true
+ *                 data:
+ *                   type: array
+ *                   items:
+ *                     type: object
+ *                     properties:
+ *                       id:
+ *                         type: string
+ *                         example: "deviceDocId"
+ *                       name:
+ *                         type: string
+ *                         example: "device1"
+ *                       status:
+ *                         type: boolean
+ *                         example: true
+ *                 message:
+ *                   type: string
+ *                   example: "Devices retrieved successfully"
+ *       403:
+ *         description: Truy cập bị từ chối (token không hợp lệ hoặc hết hạn)
+ *       500:
+ *         description: Lỗi hệ thống
+ */

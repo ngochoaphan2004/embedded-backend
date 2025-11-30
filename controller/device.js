@@ -42,6 +42,20 @@ const device = (app) => {
             return errorResponse(res, `Failed to turn off device: ${error.message}`, 500);
         }
     });
-}
 
+    // Get all devices status
+    app.get('/api/devices', authenticateToken, async (req, res) => {
+        try {
+            const deviceRef = firestore.collection('active_device');
+            const snapshot = await deviceRef.get();
+            const devices = [];
+            snapshot.forEach(doc => {
+                devices.push({ id: doc.id, ...doc.data() });
+            });
+            return successResponse(res, devices, 'Devices retrieved successfully');
+        } catch (error) {
+            return errorResponse(res, `Failed to retrieve devices: ${error.message}`, 500);
+        }
+    });
+}
 module.exports = device;
