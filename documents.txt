@@ -4,7 +4,7 @@
   ],
   "sensor_info": [
     "Check temperature, humidity, dust, gas, soil moisture, rainfall, water level.",
-    "Sample queries: \"What is the temperature now?\", \"Current humidity?\", \"Soil moisture level?\"",
+    "Sample queries: \"What is the temperature now?\", \"Current humidity?\", \"Soil moisture level?\""
   ],
   "system_work": [
     "All environmental sensor readings are updated every 3 seconds.",
