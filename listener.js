@@ -38,6 +38,14 @@ let lastData = {
   'device4': []
 }; // Store last data for each collection for anomaly detection
 
+let lastAnomalous = {
+  'history_sensor_data': false,
+  'device1': false,
+  'device2': false,
+  'device3': false,
+  'device4': false
+}; // Store last anomaly status for each collection
+
 const detectAnomaly = async (newData, lastDataArray, collection) => {
   let anomalyDetected = false;
 
@@ -63,23 +71,28 @@ const detectAnomaly = async (newData, lastDataArray, collection) => {
       rainfall: 20
     };
 
-    // Check for stuck sensor (no change in values)
-    const keys = Object.keys(thresholds);
-    const isStuck = keys.every(key => newData[key] !== undefined && lastData[key] !== undefined && newData[key] === lastData[key]);
-    if (isStuck) {
-      console.log(`❄️ Stuck sensor detected in ${collection}: values unchanged`);
-      anomalyDetected = true;
-    } else {
-      // Check for rapid changes
-      for (const key of keys) {
-        if (newData[key] !== undefined && lastData[key] !== undefined) {
-          const change = Math.abs(newData[key] - lastData[key]);
-          if (change > thresholds[key]) {
-            console.log(`⚠️ Anomaly detected in ${collection} for ${key}: change ${change} (last: ${lastData[key]}, new: ${newData[key]})`);
-            anomalyDetected = true;
+    // Check local anomaly flag
+    if (!lastAnomalous[collection]) {
+      // Check for stuck sensor (no change in values)
+      const keys = Object.keys(thresholds);
+      const isStuck = keys.every(key => newData[key] !== undefined && lastData[key] !== undefined && newData[key] === lastData[key]);
+      if (isStuck) {
+        console.log(`❄️ Stuck sensor detected in ${collection}: values unchanged`);
+        anomalyDetected = true;
+      } else {
+        // Check for rapid changes
+        for (const key of keys) {
+          if (newData[key] !== undefined && lastData[key] !== undefined) {
+            const change = Math.abs(newData[key] - lastData[key]);
+            if (change > thresholds[key]) {
+              console.log(`⚠️ Anomaly detected in ${collection} for ${key}: change ${change} (last: ${lastData[key]}, new: ${newData[key]})`);
+              anomalyDetected = true;
+            }
           }
         }
       }
+    } else {
+      console.log(`⏭️ Skipping threshold checks for ${collection} as previous was anomalous`);
     }
   }
 
@@ -106,6 +119,9 @@ const detectAnomaly = async (newData, lastDataArray, collection) => {
       console.error(`❌ Failed to send email for ${deviceName}:`, emailErr);
     }
   }
+
+  // Update local anomaly flag
+  lastAnomalous[collection] = anomalyDetected;
 
   return anomalyDetected;
 };
