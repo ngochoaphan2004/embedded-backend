@@ -38,6 +38,14 @@ let lastData = {
   'device4': []
 }; // Store last data for each collection for anomaly detection
 
+let lastAnomalous = {
+  'history_sensor_data': false,
+  'device1': false,
+  'device2': false,
+  'device3': false,
+  'device4': false
+}; // Store last anomaly status for each collection
+
 const detectAnomaly = async (newData, lastDataArray, collection) => {
   let anomalyDetected = false;
 
@@ -56,30 +64,35 @@ const detectAnomaly = async (newData, lastDataArray, collection) => {
   if (lastDataArray.length > 0) {
     const lastData = lastDataArray[lastDataArray.length - 1];
     const thresholds = {
-      temperature: 5, // Max change per reading
-      humidity: 10,
-      soilMoisture: 5,
-      waterLevel: 20,
-      rainfall: 10
+      temperature: 10, // Max change per reading
+      humidity: 20,
+      soilMoisture: 10,
+      waterLevel: 30,
+      rainfall: 20
     };
 
-    // Check for stuck sensor (no change in values)
-    const keys = Object.keys(thresholds);
-    const isStuck = keys.every(key => newData[key] !== undefined && lastData[key] !== undefined && newData[key] === lastData[key]);
-    if (isStuck) {
-      console.log(`❄️ Stuck sensor detected in ${collection}: values unchanged`);
-      anomalyDetected = true;
-    } else {
-      // Check for rapid changes
-      for (const key of keys) {
-        if (newData[key] !== undefined && lastData[key] !== undefined) {
-          const change = Math.abs(newData[key] - lastData[key]);
-          if (change > thresholds[key]) {
-            console.log(`⚠️ Anomaly detected in ${collection} for ${key}: change ${change} (last: ${lastData[key]}, new: ${newData[key]})`);
-            anomalyDetected = true;
+    // Check local anomaly flag
+    if (!lastAnomalous[collection]) {
+      // Check for stuck sensor (no change in values)
+      const keys = Object.keys(thresholds);
+      const isStuck = keys.every(key => newData[key] !== undefined && lastData[key] !== undefined && newData[key] === lastData[key]);
+      if (isStuck) {
+        console.log(`❄️ Stuck sensor detected in ${collection}: values unchanged`);
+        anomalyDetected = true;
+      } else {
+        // Check for rapid changes
+        for (const key of keys) {
+          if (newData[key] !== undefined && lastData[key] !== undefined) {
+            const change = Math.abs(newData[key] - lastData[key]);
+            if (change > thresholds[key]) {
+              console.log(`⚠️ Anomaly detected in ${collection} for ${key}: change ${change} (last: ${lastData[key]}, new: ${newData[key]})`);
+              anomalyDetected = true;
+            }
           }
         }
       }
+    } else {
+      console.log(`⏭️ Skipping threshold checks for ${collection} as previous was anomalous`);
     }
   }
 
@@ -106,6 +119,9 @@ const detectAnomaly = async (newData, lastDataArray, collection) => {
       console.error(`❌ Failed to send email for ${deviceName}:`, emailErr);
     }
   }
+
+  // Update local anomaly flag
+  lastAnomalous[collection] = anomalyDetected;
 
   return anomalyDetected;
 };
@@ -165,30 +181,31 @@ db.ref('sensor_data').on('value', async (snapshot) => {
         if (lastData['history_sensor_data'].length > MAX_DATA_POINTS) {
           lastData['history_sensor_data'].shift();
         }
+
+        const devices = ['device1', 'device2', 'device3', 'device4'];
+        for (const device of devices) {
+          const randomizedData = randomizeData(data);
+          const deviceData = { ...randomizedData, dateTime: new Date(data.timestamp) };
+
+          // Anomaly detection
+          const deviceAnomaly = await detectAnomaly(deviceData, lastData[device], device);
+
+          if (!deviceAnomaly) {
+            const deviceDocRef = await firestore.collection(device).add(deviceData);
+            console.log(`📘 Inserted data to ${device} → doc ID:`, deviceDocRef.id);
+
+            lastData[device].push(deviceData);
+            if (lastData[device].length > MAX_DATA_POINTS) {
+              lastData[device].shift();
+            }
+          } else {
+            console.log(`🚫 Skipped inserting anomalous data to ${device}`);
+          }
+        }
       } else {
         console.log('🚫 Skipped inserting anomalous data to history_sensor_data');
       }
 
-      const devices = ['device1', 'device2', 'device3', 'device4'];
-      for (const device of devices) {
-        const randomizedData = randomizeData(data);
-        const deviceData = { ...randomizedData, dateTime: new Date(data.timestamp) };
-
-        // Anomaly detection
-        const deviceAnomaly = await detectAnomaly(deviceData, lastData[device], device);
-
-        if (!deviceAnomaly) {
-          const deviceDocRef = await firestore.collection(device).add(deviceData);
-          console.log(`📘 Inserted data to ${device} → doc ID:`, deviceDocRef.id);
-
-          lastData[device].push(deviceData);
-          if (lastData[device].length > MAX_DATA_POINTS) {
-            lastData[device].shift();
-          }
-        } else {
-          console.log(`🚫 Skipped inserting anomalous data to ${device}`);
-        }
-      }
     } catch (err) {
       console.error('❌ Firestore write error:', err);
     }
