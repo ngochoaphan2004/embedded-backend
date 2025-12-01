@@ -46,6 +46,21 @@ const RELATIVE_TIME_KEYWORDS = {
 const RELATIVE_UNIT_PATTERN = Object.keys(RELATIVE_TIME_KEYWORDS).join('|');
 const RELATIVE_TIME_TOLERANCE = 0.5;
 
+const ABSOLUTE_TIME_KEYWORDS = [
+  'luc',
+  'vao luc',
+  'tai luc',
+  'tai thoi diem',
+  'vao thoi diem',
+  'thoi diem cu the',
+  'at',
+  'at time',
+  'exactly at',
+];
+const ABSOLUTE_PM_TOKENS = ['pm', 'chieu', 'toi', 'dem', 'buoi toi'];
+const ABSOLUTE_AM_TOKENS = ['am', 'sang', 'buoi sang', 'sang som'];
+const ABSOLUTE_MATCH_TOLERANCE_MS = 60 * 1000; // coi như chính xác nếu lệch trong 1 phút
+
 const NUMBER_WORD_MAP = Object.freeze({
   mot: '1',
   nhat: '1',
@@ -284,6 +299,11 @@ function extractTimeContext(message) {
     return { kind: 'current' };
   }
 
+  const absoluteCtx = detectAbsoluteTimeContext(message, msg);
+  if (absoluteCtx) {
+    return absoluteCtx;
+  }
+
     const numericMsg = substituteNumberWords(msg);
     const relativeRegex = new RegExp(`(\\d+(?:[\\.,]\\d+)?)\\s*(${RELATIVE_UNIT_PATTERN})\\b(?:\\s*(truoc|ago))?`);
     const relativeMatch = numericMsg.match(relativeRegex);
@@ -321,6 +341,187 @@ function extractTimeContext(message) {
   return { kind: 'current' };
 }
 
+function detectAbsoluteTimeContext(message, normalizedMessage) {
+  if (!message) {
+    return null;
+  }
+
+  const hasRelativeMarker = /\b(truoc|ago|cach\s+day|sau)\b/.test(normalizedMessage);
+  if (hasRelativeMarker) {
+    return null;
+  }
+
+  const hasTimePattern = /(\d{1,2})\s*(?:[:h])\s*\d{1,2}/.test(message);
+  const hasKeyword = ABSOLUTE_TIME_KEYWORDS.some(keyword => normalizedMessage.includes(keyword));
+  if (!hasKeyword && !hasTimePattern) {
+    return null;
+  }
+
+  const timeToken = parseExplicitTimeToken(message, normalizedMessage);
+  if (!timeToken) {
+    return null;
+  }
+
+  const dateToken = parseExplicitDateToken(normalizedMessage);
+  const requestedDate = buildAbsoluteDate(timeToken, dateToken);
+  if (!requestedDate) {
+    return null;
+  }
+
+  const description = formatTimestamp(requestedDate) || requestedDate.toLocaleString('vi-VN', { timeZone: VIETNAM_TIMEZONE });
+  return {
+    kind: 'absolute',
+    requestedAt: requestedDate.getTime(),
+    description,
+    requestedDescription: description,
+    requestedHasDate: Boolean(dateToken),
+  };
+}
+
+function parseExplicitTimeToken(rawMessage, normalizedMessage) {
+  const scanningText = normalizedMessage || normalize(rawMessage);
+  if (!scanningText) {
+    return null;
+  }
+
+  const candidates = [
+    /(?:(?:luc|vao\s+luc|tai\s+luc|tai\s+thoi\s+diem)\s*)?(\d{1,2})\s*(?:[:h])\s*(\d{1,2})(?:\s*(?:[:m])\s*(\d{1,2}))?/, // 11:30, 11h30
+    /(\d{1,2})\s*(?:gio|tieng|hour)s?\s*(\d{1,2})?\s*(?:phut|min)?/, // 11 gio 30 phut
+  ];
+
+  for (const pattern of candidates) {
+    const match = scanningText.match(pattern);
+    if (!match) {
+      continue;
+    }
+
+    let hour = Number.parseInt(match[1], 10);
+    const minute = match[2] !== undefined ? Number.parseInt(match[2], 10) : 0;
+    const second = match[3] !== undefined ? Number.parseInt(match[3], 10) : 0;
+
+    if (
+      !Number.isFinite(hour) ||
+      !Number.isFinite(minute) ||
+      !Number.isFinite(second) ||
+      hour < 0 ||
+      hour > 23 ||
+      minute < 0 ||
+      minute > 59 ||
+      second < 0 ||
+      second > 59
+    ) {
+      continue;
+    }
+
+    hour = applyAmPmHints(hour, scanningText);
+
+    return { hour, minute, second };
+  }
+
+  return null;
+}
+
+function parseExplicitDateToken(normalizedMessage) {
+  if (!normalizedMessage) {
+    return null;
+  }
+
+  let match = normalizedMessage.match(/(\d{4})[\/-](\d{1,2})[\/-](\d{1,2})/);
+  if (match) {
+    const year = Number.parseInt(match[1], 10);
+    const month = Number.parseInt(match[2], 10);
+    const day = Number.parseInt(match[3], 10);
+    if (isValidDateParts(year, month, day)) {
+      return { year, month, day };
+    }
+  }
+
+  match = normalizedMessage.match(/(\d{1,2})[\/-](\d{1,2})(?:[\/-](\d{2,4}))?/);
+  if (match) {
+    let year = match[3] ? Number.parseInt(match[3], 10) : null;
+    if (year !== null && year < 100) {
+      year += 2000;
+    }
+    const month = Number.parseInt(match[2], 10);
+    const day = Number.parseInt(match[1], 10);
+    if (isValidDateParts(year ?? new Date().getFullYear(), month, day)) {
+      return { year, month, day };
+    }
+  }
+
+  match = normalizedMessage.match(/ngay\s+(\d{1,2})\s+(?:thang|month)\s+(\d{1,2})(?:\s+(?:nam|year)\s+(\d{2,4}))?/);
+  if (match) {
+    let year = match[3] ? Number.parseInt(match[3], 10) : null;
+    if (year !== null && year < 100) {
+      year += 2000;
+    }
+    const month = Number.parseInt(match[2], 10);
+    const day = Number.parseInt(match[1], 10);
+    if (isValidDateParts(year ?? new Date().getFullYear(), month, day)) {
+      return { year, month, day };
+    }
+  }
+
+  return null;
+}
+
+function isValidDateParts(year, month, day) {
+  if (!year || !month || !day) {
+    return false;
+  }
+  if (month < 1 || month > 12 || day < 1 || day > 31) {
+    return false;
+  }
+  const probe = new Date(year, month - 1, day);
+  return probe.getFullYear() === year && probe.getMonth() === month - 1 && probe.getDate() === day;
+}
+
+function buildAbsoluteDate(timeToken, dateToken) {
+  if (!timeToken) {
+    return null;
+  }
+
+  const now = new Date();
+  const target = new Date(now);
+
+  if (dateToken) {
+    const year = dateToken.year ?? now.getFullYear();
+    target.setFullYear(year, (dateToken.month - 1), dateToken.day);
+    if (target.getMonth() !== dateToken.month - 1 || target.getDate() !== dateToken.day) {
+      return null;
+    }
+  } else {
+    target.setFullYear(now.getFullYear(), now.getMonth(), now.getDate());
+  }
+
+  target.setHours(timeToken.hour, timeToken.minute ?? 0, timeToken.second ?? 0, 0);
+
+  if (!dateToken && target.getTime() - now.getTime() > 30 * 60 * 1000) {
+    target.setDate(target.getDate() - 1);
+    target.setHours(timeToken.hour, timeToken.minute ?? 0, timeToken.second ?? 0, 0);
+  }
+
+  return target;
+}
+
+function applyAmPmHints(hour, normalizedMessage) {
+  if (hour == null) {
+    return null;
+  }
+
+  const lower = normalizedMessage || '';
+  const hasPm = ABSOLUTE_PM_TOKENS.some(token => lower.includes(token));
+  const hasAm = ABSOLUTE_AM_TOKENS.some(token => lower.includes(token));
+
+  if (hasPm && hour < 12) {
+    return hour + 12;
+  }
+  if (hasAm && hour === 12) {
+    return 0;
+  }
+  return hour;
+}
+
 function substituteNumberWords(text) {
   if (!text) {
     return '';
@@ -345,14 +546,14 @@ async function handleSensorQuery(sensorData, includeSensors, timeCtx, message = 
   const genericDeviceName = !restrictToRequest ? extractDeviceNameFromMessage(normalizedMessage) : null;
 
   if (genericDeviceName) {
-    if (timeCtx.kind === 'relative') {
+    if (timeCtx.kind !== 'current') {
       return 'Hiện tại tôi chỉ hỗ trợ truy vấn trạng thái thiết bị theo thời gian thực, chưa thể xem trạng thái trong quá khứ.';
     }
     return await describeSingleDevice(genericDeviceName);
   }
 
   if (!restrictToRequest && isDeviceStatusQuestion(normalizedMessage)) {
-    if (timeCtx.kind === 'relative') {
+    if (timeCtx.kind !== 'current') {
       return 'Truy vấn trạng thái thiết bị ở quá khứ chưa được hỗ trợ. Bạn có thể hỏi trạng thái hiện tại.';
     }
     return await describeAllDevices();
@@ -360,10 +561,14 @@ async function handleSensorQuery(sensorData, includeSensors, timeCtx, message = 
 
   let effectiveData = sensorData;
 
-  if (timeCtx.kind === 'relative') {
+  if (timeCtx.kind === 'relative' || timeCtx.kind === 'absolute') {
     effectiveData = await fetchHistoricalSensorData(timeCtx);
     if (!effectiveData) {
-      return `Không tìm thấy dữ liệu trong khoảng ${timeCtx.description}. Vui lòng thử với khoảng thời gian khác.`;
+      if (timeCtx.kind === 'relative') {
+        return `Không tìm thấy dữ liệu trong khoảng ${timeCtx.description}. Vui lòng thử với khoảng thời gian khác.`;
+      }
+      const requestedLabel = timeCtx.description || 'thời điểm bạn yêu cầu';
+      return `Không tìm thấy dữ liệu nào gần ${requestedLabel}. Vui lòng thử thời gian khác.`;
     }
   } else if (!includeSensors || !sensorData) {
     effectiveData = await fetchRealtimeSensorData();
@@ -509,42 +714,36 @@ const SENSOR_DEFINITIONS = [
 
 function formatAllSensors(sensorData, timeCtx) {
   if (!sensorData) {
-    return 'Xin lỗi, tôi chưa thể lấy dữ liệu cảm biến. Vui lòng thử lại sau.';
+    return 'Hiện chưa có dữ liệu cảm biến để hiển thị.';
   }
 
   const lines = SENSOR_DEFINITIONS.map(sensor => {
     const value = sensor.getValue(sensorData);
     if (value === undefined || value === null) {
-      return `${sensor.icon} ${sensor.label}: N/A`;
+      return `${sensor.icon} ${sensor.label}: (không có dữ liệu)`;
     }
     if (sensor.type === 'status') {
-      const prefix = timeCtx?.kind === 'relative' && timeCtx.description
-        ? `${sensor.label} khoảng ${timeCtx.description}`
-        : `${sensor.label} hiện tại`;
-      return `${sensor.icon} ${prefix}: ${formatOnOff(value)}`;
+      return `${sensor.icon} ${describeSensorLabel(sensor.label, timeCtx)}: ${formatOnOff(value)}`;
     }
     const numeric = normalizeNumber(value);
     const formatted = Number.isFinite(numeric) ? numeric.toFixed(1) : value;
-    const prefix = timeCtx?.kind === 'relative' && timeCtx.description
-      ? `${sensor.label} khoảng ${timeCtx.description}`
-      : `${sensor.label} hiện tại`;
-    return `${sensor.icon} ${prefix}: ${formatted}${sensor.unit || ''}`;
+    return `${sensor.icon} ${describeSensorLabel(sensor.label, timeCtx)}: ${formatted}${sensor.unit || ''}`;
   });
 
   const timestamp = formatTimestamp(sensorData?.dateTime || sensorData?.timestamp);
   const timestampLine = timestamp ? `\n\n⏰ Cập nhật lúc: ${timestamp}` : '';
   const heading = timeCtx?.kind === 'relative'
     ? '📊 **Thông số cảm biến cho khoảng thời gian bạn yêu cầu:**'
-    : '📊 **Tất cả thông số cảm biến hiện tại:**';
+    : timeCtx?.kind === 'absolute'
+      ? '📊 **Thông số cảm biến tại thời điểm bạn yêu cầu:**'
+      : '📊 **Tất cả thông số cảm biến hiện tại:**';
   return `${heading}\n\n${lines.join('\n')}${timestampLine}`;
 }
 
 function formatSingleSensor(sensor, rawValue, sensorData, timeCtx) {
   if (sensor.type === 'status') {
     const state = formatOnOff(rawValue);
-    const label = timeCtx?.kind === 'relative' && timeCtx.description
-      ? `${sensor.label} khoảng ${timeCtx.description}`
-      : `${sensor.label} hiện tại`;
+    const label = describeSensorLabel(sensor.label, timeCtx);
     return `${label} đang: **${state.toUpperCase()}**${appendTimestamp(sensorData)}`;
   }
 
@@ -553,9 +752,7 @@ function formatSingleSensor(sensor, rawValue, sensorData, timeCtx) {
     return `Xin lỗi, tôi không tìm thấy dữ liệu cho ${sensor.label}.`;
   }
 
-  const label = timeCtx?.kind === 'relative' && timeCtx.description
-    ? `${sensor.label} khoảng ${timeCtx.description}`
-    : `${sensor.label} hiện tại`;
+  const label = describeSensorLabel(sensor.label, timeCtx);
   let response = `${label} là: **${numeric.toFixed(1)}${sensor.unit || ''}**`;
 
   if (sensor.key === 'temperature') {
@@ -657,12 +854,25 @@ function isDeviceStatusQuestion(normalizedMessage) {
 function formatOnOff(v) {
   if (typeof v === 'boolean') return v ? 'Bật' : 'Tắt';
   if (typeof v === 'string') {
-    const s = normalize(v);
+    const s = v.toLowerCase();
     if (s.includes('on') || s.includes('bat')) return 'Bật';
     if (s.includes('off') || s.includes('tat')) return 'Tắt';
   }
   if (typeof v === 'number') return v ? 'Bật' : 'Tắt';
   return String(v);
+}
+
+function describeSensorLabel(sensorLabel, timeCtx) {
+  if (timeCtx?.kind === 'relative' && timeCtx.description) {
+    return `${sensorLabel} khoảng ${timeCtx.description}`;
+  }
+  if (timeCtx?.kind === 'absolute') {
+    const label = timeCtx.actualDescription || timeCtx.description || timeCtx.requestedDescription;
+    if (label) {
+      return `${sensorLabel} lúc ${label}`;
+    }
+  }
+  return `${sensorLabel} hiện tại`;
 }
 
 async function parseControlCommands(message) {
@@ -784,10 +994,23 @@ function shouldUseAiForControl(normalizedMessage, mentions, basicCommand) {
 }
 
 function withTimeContext(text, timeCtx) {
-  if (!text || !timeCtx || timeCtx.kind !== 'relative' || !timeCtx.description) {
+  if (!text || !timeCtx) {
     return text;
   }
-  return `${text}\n\n🕒 Dữ liệu tương ứng khoảng ${timeCtx.description}.`;
+
+  if (timeCtx.note) {
+    return `${text}\n\n${timeCtx.note}`;
+  }
+
+  if (timeCtx.kind === 'relative' && timeCtx.description) {
+    return `${text}\n\n🕒 Dữ liệu tương ứng khoảng ${timeCtx.description}.`;
+  }
+
+  if (timeCtx.kind === 'absolute' && timeCtx.description) {
+    return `${text}\n\n🕒 Dữ liệu tương ứng thời điểm ${timeCtx.description}.`;
+  }
+
+  return text;
 }
 
 async function fetchRealtimeSensorData() {
@@ -844,6 +1067,14 @@ async function fetchRealtimeSensorData() {
 }
 
 async function fetchHistoricalSensorData(timeCtx) {
+  if (timeCtx?.kind === 'absolute') {
+    return fetchAbsoluteSensorData(timeCtx);
+  }
+
+  if (timeCtx?.kind !== 'relative') {
+    return null;
+  }
+
   const windowStart = new Date(timeCtx.windowStart);
   const windowEnd = new Date(timeCtx.windowEnd);
 
@@ -867,6 +1098,82 @@ async function fetchHistoricalSensorData(timeCtx) {
     }
   }
   return data;
+}
+
+async function fetchAbsoluteSensorData(timeCtx) {
+  if (!timeCtx?.requestedAt) {
+    return null;
+  }
+
+  const targetDate = new Date(timeCtx.requestedAt);
+  const collection = firestore.collection('history_sensor_data');
+
+  const [afterSnap, beforeSnap] = await Promise.all([
+    collection
+      .where('dateTime', '>=', targetDate)
+      .orderBy('dateTime', 'asc')
+      .limit(1)
+      .get(),
+    collection
+      .where('dateTime', '<=', targetDate)
+      .orderBy('dateTime', 'desc')
+      .limit(1)
+      .get(),
+  ]);
+
+  const candidates = [];
+  const appendCandidate = (doc) => {
+    if (!doc?.exists) {
+      return;
+    }
+    const data = doc.data() || {};
+    const rawTimestamp = data.dateTime || data.timestamp;
+    const millis = getMillis(rawTimestamp);
+    if (!millis) {
+      return;
+    }
+    if (!data.dateTime && rawTimestamp) {
+      data.dateTime = rawTimestamp;
+    }
+    if (!data.timestamp) {
+      data.timestamp = rawTimestamp ?? millis;
+    }
+    candidates.push({ data, millis });
+  };
+
+  afterSnap.forEach(appendCandidate);
+  beforeSnap.forEach(appendCandidate);
+
+  if (!candidates.length) {
+    const requestedLabel = timeCtx.description || formatTimestamp(targetDate) || 'thời điểm bạn yêu cầu';
+    timeCtx.note = `Xin lỗi, tôi không tìm thấy bản ghi nào gần ${requestedLabel}.`;
+    return null;
+  }
+
+  candidates.sort((a, b) => Math.abs(a.millis - timeCtx.requestedAt) - Math.abs(b.millis - timeCtx.requestedAt));
+  const best = candidates[0];
+  const diff = Math.abs(best.millis - timeCtx.requestedAt);
+  const requestedLabel = timeCtx.requestedDescription || timeCtx.description || formatTimestamp(targetDate) || 'thời điểm bạn yêu cầu';
+  const actualLabel = formatTimestamp(best.millis) || requestedLabel;
+
+  timeCtx.actualDescription = actualLabel;
+  timeCtx.description = actualLabel;
+  timeCtx.requestedDescription = requestedLabel;
+
+  if (diff <= ABSOLUTE_MATCH_TOLERANCE_MS) {
+    timeCtx.note = `🕒 Dữ liệu tương ứng thời điểm ${requestedLabel}.`;
+  } else {
+    timeCtx.note = `⚠️ Không có dữ liệu chính xác lúc ${requestedLabel}. Sử dụng giá trị gần nhất lúc ${actualLabel}.`;
+  }
+
+  if (!best.data.dateTime) {
+    best.data.dateTime = best.data.timestamp || best.millis;
+  }
+  if (!best.data.timestamp) {
+    best.data.timestamp = best.millis;
+  }
+
+  return best.data;
 }
 
 async function getActiveCollections() {
