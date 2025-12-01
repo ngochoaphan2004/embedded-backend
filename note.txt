@@ -1,2 +1,2 @@
 this it command to directly add realtime data by cli. Change direction to "functions" first
-firebase database:set /sensor_data --data "{\"dateTime\": \"2025-11-08 04:47:30\", \"humidity\": 82.5, \"ledState\": false, \"pumpState\": true, \"rainfall\": 49.49, \"soilMoisture\": 8, \"temperature\": 150.0, \"timestamp\": 1762684823000, \"waterLevel\": 3}"
+firebase database:set /sensor_data --data "{\"dateTime\": \"2025-12-01 16:20:00\", \"humidity\": 84.0, \"ledState\": false, \"pumpState\": false, \"rainfall\": 0, \"soilMoisture\": 60, \"temperature\": 28.5, \"timestamp\": 1764580800002, \"waterLevel\": 20}"

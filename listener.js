@@ -56,11 +56,11 @@ const detectAnomaly = async (newData, lastDataArray, collection) => {
   if (lastDataArray.length > 0) {
     const lastData = lastDataArray[lastDataArray.length - 1];
     const thresholds = {
-      temperature: 5, // Max change per reading
-      humidity: 10,
-      soilMoisture: 5,
-      waterLevel: 20,
-      rainfall: 10
+      temperature: 10, // Max change per reading
+      humidity: 20,
+      soilMoisture: 10,
+      waterLevel: 30,
+      rainfall: 20
     };
 
     // Check for stuck sensor (no change in values)
@@ -165,30 +165,31 @@ db.ref('sensor_data').on('value', async (snapshot) => {
         if (lastData['history_sensor_data'].length > MAX_DATA_POINTS) {
           lastData['history_sensor_data'].shift();
         }
+
+        const devices = ['device1', 'device2', 'device3', 'device4'];
+        for (const device of devices) {
+          const randomizedData = randomizeData(data);
+          const deviceData = { ...randomizedData, dateTime: new Date(data.timestamp) };
+
+          // Anomaly detection
+          const deviceAnomaly = await detectAnomaly(deviceData, lastData[device], device);
+
+          if (!deviceAnomaly) {
+            const deviceDocRef = await firestore.collection(device).add(deviceData);
+            console.log(`📘 Inserted data to ${device} → doc ID:`, deviceDocRef.id);
+
+            lastData[device].push(deviceData);
+            if (lastData[device].length > MAX_DATA_POINTS) {
+              lastData[device].shift();
+            }
+          } else {
+            console.log(`🚫 Skipped inserting anomalous data to ${device}`);
+          }
+        }
       } else {
         console.log('🚫 Skipped inserting anomalous data to history_sensor_data');
       }
 
-      const devices = ['device1', 'device2', 'device3', 'device4'];
-      for (const device of devices) {
-        const randomizedData = randomizeData(data);
-        const deviceData = { ...randomizedData, dateTime: new Date(data.timestamp) };
-
-        // Anomaly detection
-        const deviceAnomaly = await detectAnomaly(deviceData, lastData[device], device);
-
-        if (!deviceAnomaly) {
-          const deviceDocRef = await firestore.collection(device).add(deviceData);
-          console.log(`📘 Inserted data to ${device} → doc ID:`, deviceDocRef.id);
-
-          lastData[device].push(deviceData);
-          if (lastData[device].length > MAX_DATA_POINTS) {
-            lastData[device].shift();
-          }
-        } else {
-          console.log(`🚫 Skipped inserting anomalous data to ${device}`);
-        }
-      }
     } catch (err) {
       console.error('❌ Firestore write error:', err);
     }
