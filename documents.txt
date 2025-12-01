@@ -1,0 +1,18 @@
+{
+  "customer_support": [
+    "For assistance, contact our customer support team at: 123456789"
+  ],
+  "sensor_info": [
+    "Check temperature, humidity, dust, gas, soil moisture, rainfall, water level.",
+    "Sample queries: \"What is the temperature now?\", \"Current humidity?\", \"Soil moisture level?\""
+  ],
+  "system_work": [
+    "All environmental sensor readings are updated every 3 seconds.",
+    "Sensor data is stored in Firestore (NoSQL).",
+    "Embedded devices and the server communicate via MQTT.",
+    "The system sends email alerts when abnormal patterns are detected in the received sensor data."
+  ],
+  "personal_info": [
+    "To update your personal information, please visit the settings section in the chatbot interface."
+  ]
+}
