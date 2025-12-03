@@ -168,7 +168,7 @@ db.ref('sensor_data').on('value', async (snapshot) => {
       };
 
       // Insert to history_sensor_data
-      const historyData = { ...data, dateTime: new Date(data.timestamp - 7 * 60 * 60 * 1000) };
+      const historyData = { ...data, dateTime: new Date(data.timestamp) };
 
       // Anomaly detection for history_sensor_data
       const historyAnomaly = await detectAnomaly(historyData, lastData['history_sensor_data'], 'history_sensor_data');
