@@ -17,8 +17,8 @@ async function clearCollections() {
 }
 
 async function insertSampleData() {
-    const now = Date.now();
-    const entries = 50; // Number of entries to insert
+    const now = Date.now() + (7 * 60 * 60 * 1000); // Vietnam UTC+7
+    const entries = 200; // Number of entries to insert
     let currentTime = now;
 
     // Initial base values (normal conditions)
