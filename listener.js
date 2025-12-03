@@ -168,7 +168,7 @@ db.ref('sensor_data').on('value', async (snapshot) => {
       };
 
       // Insert to history_sensor_data
-      const historyData = { ...data, dateTime: new Date(data.timestamp) };
+      const historyData = { ...data, dateTime: new Date(data.timestamp - 7 * 60 * 60 * 1000) };
 
       // Anomaly detection for history_sensor_data
       const historyAnomaly = await detectAnomaly(historyData, lastData['history_sensor_data'], 'history_sensor_data');
@@ -185,7 +185,7 @@ db.ref('sensor_data').on('value', async (snapshot) => {
         const devices = ['device1', 'device2', 'device3', 'device4'];
         for (const device of devices) {
           const randomizedData = randomizeData(data);
-          const deviceData = { ...randomizedData, dateTime: new Date(data.timestamp) };
+          const deviceData = { ...randomizedData, dateTime: new Date(data.timestamp - 7 * 60 * 60 * 1000) };
 
           // Anomaly detection
           const deviceAnomaly = await detectAnomaly(deviceData, lastData[device], device);
